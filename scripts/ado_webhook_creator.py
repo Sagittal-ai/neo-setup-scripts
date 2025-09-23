@@ -182,7 +182,7 @@ def get_repository_id(token, organization, project_name, respository_name) -> st
         data = resp_json.get("value", [])
 
         repositories = [repository.get("name") for repository in data]
-        print(f"  [INFO] This token can see the repositories: {', '.join(repositories)}")
+        print(f"  [INFO] For project {project_name} token can see the repositories: {', '.join(repositories)}")
 
         for repository in data:
             if respository_name == repository.get("name", {}):
