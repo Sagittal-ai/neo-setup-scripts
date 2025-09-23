@@ -160,7 +160,12 @@ def get_project_id(token, organization, project_name) -> str:
     api_url = f"https://dev.azure.com/{organization}/_apis/projects?api-version=7.1-preview.1"
     status, headers, resp_json, resp_text = _make_ado_request("GET", api_url, token)
     if status in (201, 200) and resp_json:
-        for project in resp_json.get("value", []):
+
+        data = resp_json.get("value", [])
+        projects = [project.get("name") for project in data]
+        print(f"  [INFO] This token can see the projects: {', '.join(projects)}")
+
+        for project in data:
             if project_name == project.get("name"):
                 return project.get("id")
 
@@ -174,9 +179,14 @@ def get_repository_id(token, organization, project_name, respository_name) -> st
     api_url = f"https://dev.azure.com/{organization}/{project_name}/_apis/git/repositories?api-version=7.1"
     status, headers, resp_json, resp_text = _make_ado_request("GET", api_url, token)
     if status in (201, 200) and resp_json:
-        for project in resp_json.get("value", []):
-            if respository_name == project.get("name", {}):
-                return project.get("id")
+        data = resp_json.get("value", [])
+
+        repositories = [repository.get("name") for repository in data]
+        print(f"  [INFO] This token can see the repositories: {', '.join(repositories)}")
+
+        for repository in data:
+            if respository_name == repository.get("name", {}):
+                return repository.get("id")
 
         raise Exception(f"Failed to find repository id for {respository_name}")
 
