@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 
 import argparse
-import base64
 import http.client
 import json
 import os
@@ -9,15 +8,14 @@ import sys
 import urllib.parse
 
 
-def _make_bitbucket_request(method, url, username, app_password, headers=None, body=None):
+def _make_bitbucket_request(method, url, token, headers=None, body=None):
     """
     Make a Bitbucket API request using only the standard library.
 
     Args:
         method: HTTP method (e.g., "GET", "POST").
         url: Full URL to request.
-        username: Bitbucket username.
-        app_password: Bitbucket app password.
+        token: Bitbucket API token.
         headers: Optional additional headers.
         body: Optional request body (JSON string).
 
@@ -34,20 +32,14 @@ def _make_bitbucket_request(method, url, username, app_password, headers=None, b
     if parsed_url.query:
         path += "?" + parsed_url.query
 
-    # Bitbucket uses HTTP Basic Auth with username:app_password
-    auth_str = f"{username}:{app_password}"
-    auth_bytes = auth_str.encode("utf-8")
-    auth_b64 = base64.b64encode(auth_bytes).decode("utf-8")
-
     req_headers = {
-        "Authorization": f"Basic {auth_b64}",
+        "Authorization": f"Bearer {token}",
         "Content-Type": "application/json",
         "Accept": "application/json",
-        "User-Agent": "bitbucket-webhook-creator-script",
     }
     if headers:
         req_headers.update(headers)
-    if body is not None and isinstance(body, str):
+    if body is not None:
         body = body.encode("utf-8")
 
     conn.request(method, path, body=body, headers=req_headers)
@@ -61,38 +53,12 @@ def _make_bitbucket_request(method, url, username, app_password, headers=None, b
     return resp.status, dict(resp.getheaders()), resp_json, resp_text
 
 
-def get_authenticated_user(username, app_password):
-    """
-    Get the authenticated Bitbucket user.
-
-    Args:
-        username: Bitbucket username.
-        app_password: Bitbucket app password.
-
-    Returns:
-        The username of the authenticated user.
-
-    Raises:
-        Exception: If authentication fails.
-    """
-    url = "https://api.bitbucket.org/2.0/user"
-    status, headers, resp_json, resp_text = _make_bitbucket_request("GET", url, username, app_password)
-    if status == 200 and resp_json and "username" in resp_json:
-        return resp_json["username"]
-    elif status == 200 and resp_json and "nickname" in resp_json:
-        # Sometimes Bitbucket Cloud returns "nickname" instead of "username"
-        return resp_json["nickname"]
-    else:
-        raise Exception(f"Authentication failed: {status} {resp_text}")
-
-
-def get_repo_hooks(username, app_password, workspace, repo_slug):
+def get_repo_hooks(token, workspace, repo_slug):
     """
     Get the list of webhooks for a Bitbucket repository.
 
     Args:
-        username: Bitbucket username.
-        app_password: Bitbucket app password.
+        token: Bitbucket API token.
         workspace: Bitbucket workspace (usually the team or user).
         repo_slug: Repository slug.
 
@@ -106,7 +72,7 @@ def get_repo_hooks(username, app_password, workspace, repo_slug):
     hooks = []
     next_url = url
     while next_url:
-        status, headers, resp_json, resp_text = _make_bitbucket_request("GET", next_url, username, app_password)
+        status, headers, resp_json, resp_text = _make_bitbucket_request("GET", next_url, token)
         if status != 200:
             raise Exception(f"Failed to fetch webhooks: {status} {resp_text}")
         resp_json = resp_json or {}
@@ -116,13 +82,12 @@ def get_repo_hooks(username, app_password, workspace, repo_slug):
     return hooks
 
 
-def create_repo_hook(username, app_password, workspace, repo_slug, hook_url, events, description=None, active=True):
+def create_repo_hook(token, workspace, repo_slug, hook_url, events, description=None, active=True):
     """
     Create a webhook for a Bitbucket repository.
 
     Args:
-        username: Bitbucket username.
-        app_password: Bitbucket app password.
+        token: Bitbucket API token.
         workspace: Bitbucket workspace.
         repo_slug: Repository slug.
         hook_url: The webhook URL.
@@ -144,7 +109,7 @@ def create_repo_hook(username, app_password, workspace, repo_slug, hook_url, eve
         "events": events,
     }
     body = json.dumps(data)
-    status, headers, resp_json, resp_text = _make_bitbucket_request("POST", api_url, username, app_password, body=body)
+    status, headers, resp_json, resp_text = _make_bitbucket_request("POST", api_url, token, body=body)
     if status in (201, 200) and resp_json:
         return resp_json
     else:
@@ -227,15 +192,15 @@ def main():
 
     2. Run the script from the command line:
 
-       python scripts/bitbucket_webhook_creator.py bitbucket_webhooks.json --username YOUR_BITBUCKET_USERNAME --app-password YOUR_APP_PASSWORD
+       python scripts/bitbucket_webhook_creator.py bitbucket_webhooks.json --username YOUR_BITBUCKET_USERNAME --token YOUR_API_TOKEN
 
        - Replace "bitbucket_webhooks.json" with your config file path.
-       - Replace "YOUR_BITBUCKET_USERNAME" and "YOUR_APP_PASSWORD" with your Bitbucket credentials.
+       - Replace "YOUR_BITBUCKET_USERNAME" and "YOUR_API_TOKEN" with your Bitbucket credentials.
 
        Alternatively, you can set your credentials as environment variables:
 
        export BITBUCKET_USERNAME=your_username
-       export BITBUCKET_APP_PASSWORD=your_app_password
+       export BITBUCKET_API_TOKEN=your_api_token
        python scripts/bitbucket_webhook_creator.py
 
     3. The script will:
@@ -260,28 +225,20 @@ def main():
         help="Path to the JSON file containing webhook configuration. Defaults to 'bitbucket_webhooks.json'.",
     )
     parser.add_argument(
-        "--username",
-        "-u",
+        "--token",
+        "-t",
         type=str,
         default=None,
-        help="Bitbucket username. If not provided, will use BITBUCKET_USERNAME environment variable.",
-    )
-    parser.add_argument(
-        "--app-password",
-        "-p",
-        type=str,
-        default=None,
-        help="Bitbucket app password. If not provided, will use BITBUCKET_APP_PASSWORD environment variable.",
+        help="Bitbucket API token. If not provided, will use BITBUCKET_API_TOKEN environment variable.",
     )
     args = parser.parse_args()
 
     config_file = args.config_file
-    username = args.username or os.environ.get("BITBUCKET_USERNAME")
-    app_password = args.app_password or os.environ.get("BITBUCKET_APP_PASSWORD")
+    token = args.token or os.environ.get("BITBUCKET_API_TOKEN")
 
-    if not username or not app_password:
+    if not token:
         print(
-            "Error: Bitbucket username and app password must be provided. Use --username/--app-password or set BITBUCKET_USERNAME/BITBUCKET_APP_PASSWORD env variables.",
+            "Error: Bitbucket API token must be provided. Use --token or set BITBUCKET_API_TOKEN env variables.",
             file=sys.stderr,
         )
         sys.exit(1)
@@ -294,15 +251,6 @@ def main():
         print(f"Error reading config file: {e}", file=sys.stderr)
         sys.exit(1)
 
-    # Connect to Bitbucket (authenticate)
-    try:
-        user = get_authenticated_user(username, app_password)
-    except Exception as e:
-        print(f"Error authenticating with Bitbucket: {e}", file=sys.stderr)
-        sys.exit(1)
-
-    print(f"Authenticated as: {user}")
-
     # Iterate through repositories in config
     for repo_full_name, webhooks in config.items():
         print(f"\nProcessing repository: {repo_full_name}")
@@ -314,7 +262,7 @@ def main():
 
         # Get existing webhooks to avoid duplicates
         try:
-            existing_hooks = get_repo_hooks(username, app_password, workspace, repo_slug)
+            existing_hooks = get_repo_hooks(token, workspace, repo_slug)
         except Exception as e:
             print(f"  [ERROR] Could not fetch existing webhooks: {e}", file=sys.stderr)
             continue
@@ -339,8 +287,7 @@ def main():
             # Attempt to create webhook
             try:
                 create_repo_hook(
-                    username,
-                    app_password,
+                    token,
                     workspace,
                     repo_slug,
                     url,
