@@ -1,0 +1,17 @@
+[project]
+name = "neo-setup-scripts"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12.9"
+dependencies = []
+
+[project.scripts]
+ado-create = "neo_setup_scripts.ado_webhook_creator:main"
+ado-delete = "neo_setup_scripts.ado_webhook_deletion:main"
+bitbucket-create = "neo_setup_scripts.bitbucket_webhook_creator:main"
+bitbucket-delete = "neo_setup_scripts.bitbucket_webhook_deletion:main"
+github-create = "neo_setup_scripts.github_webhook_creator:main"
+github-delete = "neo_setup_scripts.github_webhook_deleter:main"
+gitlab-create = "neo_setup_scripts.gitlab_webhook_creator:main"
+jira-create = "neo_setup_scripts.jira_webhook_creator:main"
