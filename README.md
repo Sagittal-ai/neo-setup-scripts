@@ -10,7 +10,7 @@ To install 'uv', use the following command:
 curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
-After installing 'uv', you can run the script with the following command:
+After installing 'uv', you can run our setup scripts like so:
 
 ```
 uvx --from "git+https://github.com/Sagittal-ai/neo-setup-scripts" ado-create <datafile.json> --token <token>
