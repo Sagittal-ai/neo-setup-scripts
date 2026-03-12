@@ -55,7 +55,24 @@ def _make_ado_request(method, url, token, headers=None, body=None):
     return resp.status, dict(resp.getheaders()), resp_json, resp_text
 
 
-def get_repo_hooks(token, project, repo):
+def get_base_url(organization, is_legacy):
+    """
+    Get the base URL for Azure DevOps API calls.
+    
+    Args:
+        organization: Organization name.
+        is_legacy: Whether to use legacy VisualStudio.com URL format.
+    
+    Returns:
+        Base URL string.
+    """
+    if is_legacy:
+        return f"https://{organization}.visualstudio.com"
+    else:
+        return f"https://dev.azure.com/{organization}"
+
+
+def get_repo_hooks(token, project, repo, is_legacy=False):
     """
     Retrieve existing webhooks for a given Azure DevOps repository.
 
@@ -63,6 +80,7 @@ def get_repo_hooks(token, project, repo):
         token: Azure DevOps personal access token.
         project: Project name.
         repo: Repository name.
+        is_legacy: Whether to use legacy VisualStudio.com URL format.
 
     Returns:
         List of existing webhooks.
@@ -70,7 +88,8 @@ def get_repo_hooks(token, project, repo):
     Raises:
         Exception: If fetching webhooks fails.
     """
-    api_url = f"https://dev.azure.com/{project}/_apis/hooks/subscriptions?api-version=7.1-preview.1"
+    base_url = get_base_url(project, is_legacy)
+    api_url = f"{base_url}/_apis/hooks/subscriptions?api-version=7.1-preview.1"
     status, headers, resp_json, resp_text = _make_ado_request("GET", api_url, token)
     if status == 200:
         return (resp_json or {}).get("value", [])
@@ -83,18 +102,19 @@ def snake_to_camel(snake_str):
     return parts[0] + "".join(word.capitalize() for word in parts[1:])
 
 
-def create_hook(token, organization, url, event_type, project_id, publisher_inputs, repository_id=None):
+def create_hook(token, organization, url, event_type, project_id, publisher_inputs, repository_id=None, is_legacy=False):
     """
     Create a webhook for a repository in Azure DevOps.
 
     Args:
         token: Azure DevOps personal access token.
-        project: Project name.
-        repo: Repository name.
+        organization: Organization name.
         url: Webhook URL.
         event_type: Event name to subscribe to.
-        description: Description of the webhook.
-        active: Whether the webhook should be active.
+        project_id: Project ID.
+        publisher_inputs: Publisher inputs dictionary.
+        repository_id: Repository ID (optional).
+        is_legacy: Whether to use legacy VisualStudio.com URL format.
 
     Returns:
         The created webhook object.
@@ -102,9 +122,8 @@ def create_hook(token, organization, url, event_type, project_id, publisher_inpu
     Raises:
         Exception: If webhook creation fails.
     """
-    # https://dev.azure.com/Sagittal/_apis/hooks/subscriptions
-
-    api_url = f"https://dev.azure.com/{organization}/_apis/hooks/subscriptions?api-version=7.1-preview.1"
+    base_url = get_base_url(organization, is_legacy)
+    api_url = f"{base_url}/_apis/hooks/subscriptions?api-version=7.1-preview.1"
     publisher_inputs_camel = {}
     for key, value in publisher_inputs.items():
         key_camel = snake_to_camel(key)
@@ -156,8 +175,9 @@ def create_hook(token, organization, url, event_type, project_id, publisher_inpu
         raise Exception(f"Failed to create webhook: {status} {resp_text}")
 
 
-def get_project_id(token, organization, project_name) -> str:
-    api_url = f"https://dev.azure.com/{organization}/_apis/projects?api-version=7.1-preview.1"
+def get_project_id(token, organization, project_name, is_legacy=False) -> str:
+    base_url = get_base_url(organization, is_legacy)
+    api_url = f"{base_url}/_apis/projects?api-version=7.1-preview.1"
     status, headers, resp_json, resp_text = _make_ado_request("GET", api_url, token)
     if status in (201, 200) and resp_json:
 
@@ -175,8 +195,9 @@ def get_project_id(token, organization, project_name) -> str:
         raise Exception(f"Failed to find project_id: {status} {resp_text}")
 
 
-def get_repository_id(token, organization, project_name, respository_name) -> str:
-    api_url = f"https://dev.azure.com/{organization}/{project_name}/_apis/git/repositories?api-version=7.1"
+def get_repository_id(token, organization, project_name, respository_name, is_legacy=False) -> str:
+    base_url = get_base_url(organization, is_legacy)
+    api_url = f"{base_url}/{project_name}/_apis/git/repositories?api-version=7.1"
     status, headers, resp_json, resp_text = _make_ado_request("GET", api_url, token)
     if status in (201, 200) and resp_json:
         data = resp_json.get("value", [])
@@ -216,6 +237,10 @@ def main():
        - Replace "webhooks.json" with the path to your config file.
        - Replace "YOUR_ADO_TOKEN" with your personal access token.
 
+       For legacy VisualStudio.com organizations, add the --legacy flag:
+
+       python scripts/ado_webhook_creator.py webhooks.json --token YOUR_ADO_TOKEN --legacy
+
        Alternatively, you can set your token as an environment variable:
 
        export ADO_TOKEN=YOUR_ADO_TOKEN
@@ -230,6 +255,7 @@ def main():
     - You do NOT need to install any extra Python packages; this script uses only the standard library.
     - If you see errors about authentication or permissions, check your token and repository access.
     - You must have admin rights on the repository to add webhooks.
+    - Use the --legacy flag if your organization uses *.visualstudio.com URLs instead of dev.azure.com.
     """
     parser = argparse.ArgumentParser(description=main.__doc__, formatter_class=argparse.RawTextHelpFormatter)
 
@@ -247,13 +273,25 @@ def main():
         default=None,
         help="Azure DevOps personal access token. If not provided, will use ADO_TOKEN environment variable.",
     )
+    parser.add_argument(
+        "--legacy",
+        "-l",
+        action="store_true",
+        default=False,
+        help="Use legacy VisualStudio.com URL format ({org}.visualstudio.com) instead of dev.azure.com/{org}.",
+    )
     args = parser.parse_args()
 
     config_file = args.config_file
     ado_token = args.token or os.environ.get("ADO_TOKEN")
+    is_legacy = args.legacy
+    
     if not ado_token:
         print("Error: Azure DevOps token not provided. Use --token or set ADO_TOKEN env variable.", file=sys.stderr)
         sys.exit(1)
+
+    if is_legacy:
+        print("[INFO] Using legacy VisualStudio.com URL format")
 
     # Load config file
     try:
@@ -273,7 +311,7 @@ def main():
 
         # Get existing webhooks to avoid duplicates
         try:
-            existing_hooks = get_repo_hooks(ado_token, organization, repo)
+            existing_hooks = get_repo_hooks(ado_token, organization, repo, is_legacy)
         except Exception as e:
             print(f"  [ERROR] Could not fetch existing webhooks: {e}", file=sys.stderr)
             continue
@@ -288,11 +326,11 @@ def main():
             repository_name = publisher_inputs.get("repository_name")
             area_path = publisher_inputs.get("area_path")
 
-            project_id = get_project_id(ado_token, organization, project_name)
+            project_id = get_project_id(ado_token, organization, project_name, is_legacy)
             repository_id = None
 
             if repository_name:
-                repository_id = get_repository_id(ado_token, organization, project_name, repository_name)
+                repository_id = get_repository_id(ado_token, organization, project_name, repository_name, is_legacy)
 
             # Check if webhook with same URL already exists
             already_exists = False
@@ -335,6 +373,7 @@ def main():
                     project_id,
                     publisher_inputs,
                     repository_id=repository_id,
+                    is_legacy=is_legacy,
                 )
                 print(f"  [OK] Created webhook '{name}' for event {event_type}")
             except Exception as e:
